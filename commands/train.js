@@ -56,6 +56,12 @@ async function runTrain(csvPath, outputPath) {
   console.log("\nColumn influence ranking:");
   for (const row of importance) console.log(`${row.rank}. ${row.column} (${row.importanceScore.toFixed(6)})`);
 
+  const avgR2 = Object.values(validation).reduce((acc, m) => acc + m.r2, 0) / Object.keys(validation).length;
+  let overallVerdict = "Strong";
+  if (avgR2 < 0.5) overallVerdict = "Weak";
+  else if (avgR2 < 0.75) overallVerdict = "Moderate";
+  console.log(`\nOVERALL VERDICT: ${overallVerdict} (Average R2: ${avgR2.toFixed(4)})`);
+
   ensureDirectory(path.dirname(outputPath));
   fs.writeFileSync(outputPath, JSON.stringify(model, null, 2), "utf8");
   console.log(`\nModel saved to ${outputPath}`);

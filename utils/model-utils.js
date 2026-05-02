@@ -4,7 +4,7 @@ const readline = require("readline");
 const { parse } = require("csv-parse/sync");
 const dfd = require("danfojs-node");
 const { Matrix, CholeskyDecomposition } = require("ml-matrix");
-const { RandomForestClassifier, RandomForestRegression } = require("ml-random-forest/random-forest.js");
+const { RandomForestClassifier, RandomForestRegression } = require("ml-random-forest");
 
 // This function detects whether a value should be treated as missing.
 function isBlank(value) {
@@ -266,19 +266,6 @@ function fitAndTransform(rows, metadata) {
 }
 
 // This function converts one raw row into encoded numeric feature space.
-function encodeRow(row, encoding) {
-  const out = {};
-  for (const [c, cfg] of Object.entries(encoding.numeric)) {
-    const v = Number(row[c]);
-    const denom = cfg.max - cfg.min;
-    out[c] = denom === 0 ? 0 : (v - cfg.min) / denom;
-  }
-  for (const [c, cfg] of Object.entries(encoding.text)) {
-    const raw = String(row[c]);
-    for (const cat of cfg.categories) out[`${c}__${cat}`] = raw === cat ? 1 : 0;
-  }
-  return out;
-}
 
 // This function decodes an encoded row into user-visible columns only.
 function decodeUserRow(encoded, model, excludeColumns = []) {
@@ -331,8 +318,11 @@ function makeDatasetForTarget(encodedRows, cfg) {
 
 // This function computes the RBF kernel value between two vectors.
 function rbfKernel(a, b, lengthScale) {
-  const diff = Matrix.rowVector(a).sub(Matrix.rowVector(b));
-  const sqNorm = diff.mmul(diff.transpose()).get(0, 0);
+  let sqNorm = 0;
+  for (let i = 0; i < a.length; i++) {
+    const diff = a[i] - b[i];
+    sqNorm += diff * diff;
+  }
   return Math.exp(-sqNorm / (2 * lengthScale * lengthScale));
 }
 
@@ -341,12 +331,14 @@ function buildKernelMatrix(trainX, lengthScale, noiseVariance) {
   const n = trainX.length;
   const K = Matrix.zeros(n, n);
   for (let i = 0; i < n; i += 1) {
-    for (let j = 0; j < n; j += 1) {
-      K.set(i, j, rbfKernel(trainX[i], trainX[j], lengthScale));
+    K.set(i, i, 1.0 + noiseVariance);
+    for (let j = i + 1; j < n; j += 1) {
+      const val = rbfKernel(trainX[i], trainX[j], lengthScale);
+      K.set(i, j, val);
+      K.set(j, i, val);
     }
   }
-  const noiseI = Matrix.eye(n, n).mul(noiseVariance);
-  return K.add(noiseI);
+  return K;
 }
 
 // This function fits one Gaussian Process model and returns serializable state.
@@ -617,15 +609,25 @@ function permutationImportance(model, encodedRows, rawRows) {
   }));
 }
 
-// This function computes Expected Improvement using Monte Carlo sampling.
-function expectedImprovement(mu, sd, bestSoFar, nSamples = 200) {
-  const sigma = Math.max(sd, 1e-9);
-  let gain = 0;
-  for (let i = 0; i < nSamples; i += 1) {
-    const z = Math.sqrt(-2 * Math.log(Math.random())) * Math.cos(2 * Math.PI * Math.random());
-    gain += Math.max(0, mu + sigma * z - bestSoFar);
-  }
-  return gain / nSamples;
+// This function computes the Standard Normal Cumulative Distribution Function.
+function normalCDF(x) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(x));
+  const d = 0.3989423 * Math.exp(-x * x / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return x > 0 ? 1 - p : p;
+}
+
+// This function computes the Standard Normal Probability Density Function.
+function normalPDF(x) {
+  return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
+}
+
+// This function computes Expected Improvement using the analytical formula.
+function expectedImprovement(mu, sd, bestSoFar) {
+  if (sd <= 0) return 0;
+  const delta = mu - bestSoFar;
+  const z = delta / sd;
+  return delta * normalCDF(z) + sd * normalPDF(z);
 }
 
 // This function samples one random encoded candidate and sets internal flags safely.
@@ -673,7 +675,7 @@ function rankCandidatesByEI(model, maximizeCol, candidates, observedBest, target
       const ei = expectedImprovement(pred.mu, pred.sd, observedBest);
       return { encoded, pred, objective: ei };
     }
-    let objective = 0;
+    let objective;
     if (targetOutcome) {
       const found = pred.ranked.find((r) => r.label === targetOutcome);
       objective = found ? found.probability : 0;
@@ -716,4 +718,7 @@ module.exports = {
   rankCandidatesByEI,
   persistSuggestions,
   predictTarget,
+  mae,
+  r2,
+  expectedImprovement,
 };
