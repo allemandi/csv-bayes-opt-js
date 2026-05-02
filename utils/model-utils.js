@@ -71,12 +71,24 @@ function inferColumnTypes(records) {
   for (const col of columns) {
     const values = records.map((r) => r[col]).filter((v) => !isBlank(v));
     let numericCount = 0;
+    let maxPrecision = 0;
     for (const v of values) {
       const n = Number(v);
-      if (!Number.isNaN(n) && Number.isFinite(n)) numericCount += 1;
+      if (!Number.isNaN(n) && Number.isFinite(n)) {
+        numericCount += 1;
+        const s = String(v);
+        if (s.includes(".")) {
+          const precision = s.split(".")[1].length;
+          if (precision > maxPrecision) maxPrecision = precision;
+        }
+      }
     }
     const numeric = values.length > 0 && numericCount / values.length >= 0.9;
-    metadata[col] = { originalType: numeric ? "number" : "text", internal: false };
+    metadata[col] = {
+      originalType: numeric ? "number" : "text",
+      internal: false,
+      precision: numeric ? maxPrecision : null,
+    };
   }
   return metadata;
 }
@@ -654,15 +666,21 @@ function applyFixedValuesToEncoded(model, encoded, fixedValues, skippedColumns) 
 }
 
 // This function ranks candidate points by expected improvement for a chosen target.
-function rankCandidatesByEI(model, maximizeCol, candidates, observedBest) {
+function rankCandidatesByEI(model, maximizeCol, candidates, observedBest, targetOutcome) {
   const scored = candidates.map((encoded) => {
     const pred = predictTarget(model, maximizeCol, encoded);
     if (pred.type === "number") {
       const ei = expectedImprovement(pred.mu, pred.sd, observedBest);
       return { encoded, pred, objective: ei };
     }
-    const bestClassProb = pred.ranked[0] ? pred.ranked[0].probability : 0;
-    return { encoded, pred, objective: bestClassProb };
+    let objective = 0;
+    if (targetOutcome) {
+      const found = pred.ranked.find((r) => r.label === targetOutcome);
+      objective = found ? found.probability : 0;
+    } else {
+      objective = pred.ranked[0] ? pred.ranked[0].probability : 0;
+    }
+    return { encoded, pred, objective };
   });
   scored.sort((a, b) => b.objective - a.objective);
   return scored;

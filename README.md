@@ -73,28 +73,25 @@ If skipped:
 - `--maximize` is asked interactively
 
 Suggest behavior:
-- Generates 2000 random candidates and prints top 3 best options.
-- Then asks what inputs you already know.
-- It does not ask for the target column you are maximizing.
-- Any input left blank is auto-optimized.
-- Saves suggestion sessions to `data/suggestions_{timestamp}.json`.
+- **Target Selection**: You pick which column you want to optimize.
+  - If numeric: The optimizer finds the input combination most likely to produce the **highest value**.
+  - If categorical: You pick which **specific outcome** you want to make most likely. The optimizer finds the inputs that maximize the predicted probability of that outcome.
+- **Top 3 Suggestions**: The system automatically generates 2000 random combinations and shows you the 3 best ones it found.
+- **Interactive Mode**: You can then enter specific values for some inputs (soft constraints). The model "fixed" those values and optimizes the remaining columns to find the best possible result given those constraints.
+- **Saves Results**: Sessions are saved to `data/suggestions_{timestamp}.json`.
 
-### How target column type is handled
+### How predictions are displayed
 
-- **Numeric target column**:
-  - Optimizer maximizes Expected Improvement.
-  - Output shows predicted value with 95% confidence interval.
+- **Numeric target column**: Rounded to the same precision as the original data. Shows a 95% confidence interval (a range where the true value is likely to fall).
+- **Categorical target column**: Always shown as a percentage likelihood of the chosen outcome (e.g., `87.5% likelihood of TRUE`).
 
-- **Binary target column** (`TRUE/FALSE` or any 2-value text column):
-  - Internally treated as a 1/0 probability target.
-  - Output is shown as percentage confidence, for example: `87% likelihood of finishing`.
-  - Optimizer maximizes the probability of the most likely binary outcome.
+## Layman's guide to results
 
-- **Multi-class target column** (3+ text values):
-  - Model predicts a probability for every possible class.
-  - Output ranks all class probabilities highest to lowest and names the top class first.
-  - Example style: `Most likely outcome: TypeB (61%). Alternatives: TypeA (24%), TypeC (15%).`
-  - Optimizer searches for inputs that maximize the probability of the single most likely class.
+### Top 3 automatic suggestions
+These are the "best guesses" found by the AI after scanning thousands of possibilities. They represent the input combinations that the model believes are most likely to give you the outcome you want, while also exploring areas where it's less certain but there's high potential for a better result.
+
+### Column influence rankings
+This tells you which input columns "matter" most to the model. A high ranking means that changing this column's value has a large impact on the prediction. This helps you understand which factors are the primary drivers of your target outcome.
 
 ## Plain-English metric guide (good vs bad)
 
