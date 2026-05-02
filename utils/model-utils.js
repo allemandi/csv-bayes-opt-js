@@ -318,11 +318,8 @@ function makeDatasetForTarget(encodedRows, cfg) {
 
 // This function computes the RBF kernel value between two vectors.
 function rbfKernel(a, b, lengthScale) {
-  let sqNorm = 0;
-  for (let i = 0; i < a.length; i++) {
-    const diff = a[i] - b[i];
-    sqNorm += diff * diff;
-  }
+  const diff = Matrix.rowVector(a).sub(Matrix.rowVector(b));
+  const sqNorm = diff.mmul(diff.transpose()).get(0, 0);
   return Math.exp(-sqNorm / (2 * lengthScale * lengthScale));
 }
 

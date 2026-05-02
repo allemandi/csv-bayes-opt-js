@@ -11,12 +11,13 @@ export default [
                 process: "readonly",
                 __dirname: "readonly",
                 console: "readonly",
-                // Jest
+                // Vitest
                 test: "readonly",
                 expect: "readonly",
                 describe: "readonly",
                 beforeEach: "readonly",
                 afterEach: "readonly",
+                vitest: "readonly",
             },
             ecmaVersion: "latest",
             sourceType: "module",

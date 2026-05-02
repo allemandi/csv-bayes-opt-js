@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "jest",
+    "test": "vitest run",
     "lint": "eslint ."
   },
   "repository": {
@@ -19,6 +19,7 @@
   },
   "homepage": "https://github.com/allemandi/csv-bayes-opt#readme",
   "dependencies": {
+    "@tensorflow/tfjs-node": "^4.22.0",
     "commander": "^14.0.3",
     "csv-parse": "^6.2.1",
     "danfojs-node": "^1.2.0",
@@ -29,6 +30,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.3.0",
-    "jest": "^30.3.0"
+    "vite": "^8.0.10",
+    "vitest": "^4.1.5"
   }
 }
