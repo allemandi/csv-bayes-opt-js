@@ -9,24 +9,23 @@ const {
   persistSuggestions,
 } = require("../utils/model-utils");
 
-// This function formats categorical probabilities in ranked plain-English form.
-function formatRankedCategories(ranked) {
-  if (!ranked.length) return "No category probabilities available.";
-  const [top, ...rest] = ranked;
-  const topPct = `${(100 * top.probability).toFixed(1)}%`;
-  if (!rest.length) return `Most likely outcome: ${top.label} (${topPct}).`;
-  const alt = rest.map((r) => `${r.label} (${(100 * r.probability).toFixed(1)}%)`).join(", ");
-  return `Most likely outcome: ${top.label} (${topPct}). Alternatives: ${alt}.`;
-}
-
-// This function detects if a target column is binary-like for percentage confidence messaging.
-function isBinaryCategoricalTarget(model, maximizeCol) {
-  if (!model.encoding.text[maximizeCol]) return false;
-  return model.encoding.text[maximizeCol].categories.length === 2;
+// This function formats prediction output based on user requirements.
+function formatPrediction(model, target, pred, chosenOutcome) {
+  if (pred.type === "number") {
+    const precision = model.metadata[target].precision || 0;
+    const mu = pred.mu.toFixed(precision);
+    const low = (pred.mu - 1.96 * pred.sd).toFixed(precision);
+    const high = (pred.mu + 1.96 * pred.sd).toFixed(precision);
+    return `${target} prediction: ${mu} (95% CI: ${low} to ${high})`;
+  }
+  const outcome = chosenOutcome || (pred.ranked[0] ? pred.ranked[0].label : "n/a");
+  const found = pred.ranked.find((r) => r.label === outcome);
+  const prob = found ? (100 * found.probability).toFixed(1) : "0.0";
+  return `${prob}% likelihood of ${outcome}.`;
 }
 
 // This function asks for known inputs, optimizes unknowns, and logs a final suggestion.
-async function runInteractiveSuggest(model, maximizeCol, sessionLog, dataDir) {
+async function runInteractiveSuggest(model, maximizeCol, chosenOutcome, sessionLog, dataDir) {
   const inputColumns = model.userColumns.filter((c) => c !== maximizeCol);
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const fixed = {};
@@ -62,7 +61,9 @@ async function runInteractiveSuggest(model, maximizeCol, sessionLog, dataDir) {
   }
   rl.close();
 
-  const bestObserved = Math.max(...model.cleanedData.map((r) => Number(r[maximizeCol])));
+  const bestObserved = model.metadata[maximizeCol].originalType === "number"
+    ? Math.max(...model.cleanedData.map((r) => Number(r[maximizeCol])))
+    : 0;
   const candidates = [];
   for (let i = 0; i < 2000; i += 1) {
     const encoded = randomEncodedCandidate(model);
@@ -70,23 +71,14 @@ async function runInteractiveSuggest(model, maximizeCol, sessionLog, dataDir) {
     candidates.push(encoded);
   }
 
-  const best = rankCandidatesByEI(model, maximizeCol, candidates, bestObserved)[0];
+  const best = rankCandidatesByEI(model, maximizeCol, candidates, bestObserved, chosenOutcome)[0];
   const decoded = decodeUserRow(best.encoded, model, [maximizeCol]);
-  let predictionSummary = "";
-  if (best.pred.type === "number") {
-    const low = best.pred.mu - 1.96 * best.pred.sd;
-    const high = best.pred.mu + 1.96 * best.pred.sd;
-    predictionSummary = `${maximizeCol} prediction: ${best.pred.mu.toFixed(4)} (95% CI: ${low.toFixed(4)} to ${high.toFixed(4)})`;
-  } else if (isBinaryCategoricalTarget(model, maximizeCol)) {
-    const top = best.pred.ranked[0];
-    predictionSummary = `${(100 * top.probability).toFixed(1)}% likelihood of ${top.label}.`;
-  } else {
-    predictionSummary = formatRankedCategories(best.pred.ranked);
-  }
+  const predictionSummary = formatPrediction(model, maximizeCol, best.pred, chosenOutcome);
 
   const sessionResult = {
     timestamp: new Date().toISOString(),
     maximize: maximizeCol,
+    targetOutcome: chosenOutcome,
     fixedInputs: fixed,
     suggestion: decoded,
   };
@@ -116,47 +108,61 @@ async function runSuggest(modelPath, maximizeArg, dataDir) {
   if (!Array.isArray(model.userColumns) || !model.userColumns.length) {
     throw new Error("Model file is missing user column metadata. Retrain with the latest version.");
   }
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   let maximizeCol = maximizeArg;
   if (!maximizeCol) {
-    console.log(`Available columns to maximize: ${model.userColumns.join(", ")}`);
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    maximizeCol = (await askQuestion(rl, "Pick one column to maximize: ")).trim();
+    console.log(`Available columns: ${model.userColumns.join(", ")}`);
+    maximizeCol = (await askQuestion(rl, "Pick a target column: ")).trim();
+  }
+  if (!model.userColumns.includes(maximizeCol)) {
     rl.close();
+    throw new Error(`Unknown column: ${maximizeCol}`);
   }
-  if (!model.userColumns.includes(maximizeCol)) throw new Error(`Unknown column for --maximize: ${maximizeCol}`);
+
+  let chosenOutcome = null;
   if (model.metadata[maximizeCol].originalType === "number") {
-    console.log(`Target '${maximizeCol}' is numeric: optimizer uses Expected Improvement.`);
+    const prompt = `You selected ${maximizeCol} — the optimizer will find the input combination most likely to produce the highest value. Press enter to confirm or type a different column name. `;
+    const confirm = (await askQuestion(rl, prompt)).trim();
+    if (confirm !== "") {
+      maximizeCol = confirm;
+      if (!model.userColumns.includes(maximizeCol)) {
+        rl.close();
+        throw new Error(`Unknown column: ${maximizeCol}`);
+      }
+      // Recursively handle if they changed it, but for simplicity let's just proceed with one change
+      if (model.metadata[maximizeCol].originalType === "text") {
+        const cats = model.encoding.text[maximizeCol].categories;
+        console.log(`You selected ${maximizeCol} — which outcome do you want to make most likely?`);
+        console.log(`Options: ${cats.join(", ")}`);
+        chosenOutcome = (await askQuestion(rl, "Choice: ")).trim();
+      }
+    }
   } else {
-    const classCount = model.encoding.text[maximizeCol].categories.length;
-    console.log(`Target '${maximizeCol}' is categorical (${classCount} classes): optimizer maximizes top-class probability.`);
+    const cats = model.encoding.text[maximizeCol].categories;
+    console.log(`You selected ${maximizeCol} — which outcome do you want to make most likely?`);
+    console.log(`Options: ${cats.join(", ")}`);
+    chosenOutcome = (await askQuestion(rl, "Choice: ")).trim();
   }
+  rl.close();
 
   const bestObserved = model.metadata[maximizeCol].originalType === "number"
     ? Math.max(...model.cleanedData.map((r) => Number(r[maximizeCol])))
     : 0;
   const candidates = [];
   for (let i = 0; i < 2000; i += 1) candidates.push(randomEncodedCandidate(model));
-  const top = rankCandidatesByEI(model, maximizeCol, candidates, bestObserved).slice(0, 3);
+  const top = rankCandidatesByEI(model, maximizeCol, candidates, bestObserved, chosenOutcome).slice(0, 3);
 
   console.log("\nTop 3 automatic suggestions:");
   top.forEach((item, idx) => {
     const decoded = decodeUserRow(item.encoded, model, [maximizeCol]);
     console.log(`\n#${idx + 1}`);
     console.log(decoded);
-    if (item.pred.type === "number") {
-      const low = item.pred.mu - 1.96 * item.pred.sd;
-      const high = item.pred.mu + 1.96 * item.pred.sd;
-      console.log(`${maximizeCol}: ${item.pred.mu.toFixed(4)} (95% CI: ${low.toFixed(4)} to ${high.toFixed(4)})`);
-    } else if (isBinaryCategoricalTarget(model, maximizeCol)) {
-      const topOutcome = item.pred.ranked[0];
-      console.log(`${(100 * topOutcome.probability).toFixed(1)}% likelihood of ${topOutcome.label}.`);
-    } else {
-      console.log(formatRankedCategories(item.pred.ranked));
-    }
+    console.log(formatPrediction(model, maximizeCol, item.pred, chosenOutcome));
   });
 
   const sessionLog = [];
-  await runInteractiveSuggest(model, maximizeCol, sessionLog, dataDir);
+  await runInteractiveSuggest(model, maximizeCol, chosenOutcome, sessionLog, dataDir);
 }
 
 module.exports = { runSuggest };
