@@ -38,6 +38,28 @@ Interactive optimization engine.
 - **Automation**: Generates top 3 automatic suggestions.
 - **Interaction**: Allows fixing specific inputs to see how the model optimizes the remaining variables.
 
+## Pipeline Logic
+
+This tool follows a structured pipeline from raw CSV data to actionable optimization suggestions:
+
+1.  **Data Ingestion & Cleaning**:
+    - Loads CSV data and infers column types (numeric or text).
+    - Automatically handles missing values by imputing the median for numeric columns and the mode for categorical columns.
+    - Identifies and optionally removes 3-sigma numeric outliers.
+2.  **Feature Engineering**:
+    - Standardizes numeric features using Min-Max scaling.
+    - Encodes categorical text features using One-Hot encoding.
+3.  **Surrogate Modeling**:
+    - Trains a predictive model for *every* column in the dataset, allowing any column to be treated as a target.
+    - Uses **Gaussian Process Regression** for small datasets (< 400 rows) for high-fidelity uncertainty estimation.
+    - Switches to **Random Forest** for larger datasets to maintain performance.
+4.  **Bayesian Optimization**:
+    - For numeric targets, it uses the **Expected Improvement (EI)** acquisition function to balance exploration (searching uncertain areas) and exploitation (refining known good areas).
+    - For categorical targets, it maximizes the predicted probability of the desired outcome.
+5.  **Interactive Suggestions**:
+    - Generates thousands of random candidate points.
+    - If you provide partial data, the tool "fills in" the missing fields by finding the values that optimize your target.
+
 ## Key Metrics
 
 - **MAE**: Average prediction error (lower is better).

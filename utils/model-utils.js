@@ -623,12 +623,14 @@ function permutationImportance(model, encodedRows, rawRows) {
     }));
 }
 
-// This function computes the Standard Normal Cumulative Distribution Function.
-function normalCDF(x) {
-    const t = 1 / (1 + 0.2316419 * Math.abs(x));
-    const d = 0.3989423 * Math.exp(-x * x / 2);
+// This function computes the Normal Cumulative Distribution Function.
+function normalCDF(x, mu = 0, sd = 1) {
+    if (sd === 0) return x < mu ? 0 : 1;
+    const z = (x - mu) / sd;
+    const t = 1 / (1 + 0.2316419 * Math.abs(z));
+    const d = 0.3989423 * Math.exp(-z * z / 2);
     const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
-    return x > 0 ? 1 - p : p;
+    return z > 0 ? 1 - p : p;
 }
 
 // This function computes the Standard Normal Probability Density Function.
@@ -734,5 +736,6 @@ module.exports = {
     predictTarget,
     mae,
     r2,
+    normalCDF,
     expectedImprovement,
 };
