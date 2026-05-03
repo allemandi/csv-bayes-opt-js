@@ -2,6 +2,7 @@ const {
   mean,
   mae,
   r2,
+  normalCDF,
   expectedImprovement,
 } = require("../utils/model-utils");
 
@@ -35,6 +36,27 @@ describe("model-utils", () => {
 
     test("returns 1 if ssTot is 0", () => {
       expect(r2([1, 1], [1, 1])).toBe(1);
+    });
+  });
+
+  describe("normalCDF", () => {
+    test("calculates standard normal CDF (mu=0, sd=1)", () => {
+      // P(X <= 0) for N(0,1) is 0.5
+      expect(normalCDF(0)).toBeCloseTo(0.5, 4);
+      // P(X <= 1.96) for N(0,1) is approx 0.975
+      expect(normalCDF(1.96)).toBeCloseTo(0.975, 3);
+    });
+
+    test("calculates CDF for non-standard normal distribution", () => {
+      // P(X <= 10) for N(10, 2) is 0.5
+      expect(normalCDF(10, 10, 2)).toBeCloseTo(0.5, 4);
+      // P(X <= 12) for N(10, 2) is P(Z <= 1) approx 0.8413
+      expect(normalCDF(12, 10, 2)).toBeCloseTo(0.8413, 3);
+    });
+
+    test("handles sd=0", () => {
+      expect(normalCDF(5, 10, 0)).toBe(0);
+      expect(normalCDF(15, 10, 0)).toBe(1);
     });
   });
 
