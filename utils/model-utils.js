@@ -4,7 +4,7 @@ const readline = require("readline");
 const { parse } = require("csv-parse/sync");
 const dfd = require("danfojs-node");
 const { Matrix, CholeskyDecomposition } = require("ml-matrix");
-const { RandomForestClassifier, RandomForestRegression } = require("ml-random-forest");
+const { RandomForestRegression } = require("ml-random-forest");
 
 // This function detects whether a value should be treated as missing.
 function isBlank(value) {
@@ -328,8 +328,11 @@ function makeDatasetForTarget(encodedRows, rawRows, cfg) {
 
 // This function computes the RBF kernel value between two vectors.
 function rbfKernel(a, b, lengthScale) {
-    const diff = Matrix.rowVector(a).sub(Matrix.rowVector(b));
-    const sqNorm = diff.mmul(diff.transpose()).get(0, 0);
+    let sqNorm = 0;
+    for (let i = 0; i < a.length; i += 1) {
+        const d = a[i] - b[i];
+        sqNorm += d * d;
+    }
     return Math.exp(-sqNorm / (2 * lengthScale * lengthScale));
 }
 
@@ -365,19 +368,19 @@ function fitGaussianProcess(trainX, trainY, lengthScale, noiseVariance) {
 }
 
 // This function predicts GP mean and variance for one candidate input.
-function predictGaussianProcess(gpState, xStar) {
+function predictGaussianProcess(gpState, xStar, precomputedChol = null) {
     const kStar = Matrix.columnVector(gpState.trainX.map((row) => rbfKernel(row, xStar, gpState.lengthScale)));
     const alphaCol = Matrix.columnVector(gpState.alpha);
     const mean = kStar.transpose().mmul(alphaCol).get(0, 0);
-    const chol = new CholeskyDecomposition(new Matrix(gpState.kernelMatrix));
+    const chol = precomputedChol || new CholeskyDecomposition(new Matrix(gpState.kernelMatrix));
     const solveKStar = chol.solve(kStar);
-    const kxx = rbfKernel(xStar, xStar, gpState.lengthScale) + gpState.noiseVariance;
+    const kxx = 1.0 + gpState.noiseVariance;
     const variance = Math.max(kxx - kStar.transpose().mmul(solveKStar).get(0, 0), 1e-12);
     return { mean, variance };
 }
 
 // This function predicts one target column value and confidence from a candidate row.
-function predictTarget(model, target, encodedRow) {
+function predictTarget(model, target, encodedRow, precomputed = null) {
     const cfg = model.targetConfigs[target];
     const train = model.trainedTargets[target];
     const x = cfg.xKeys.map((k) => Number(encodedRow[k] || 0));
@@ -385,11 +388,11 @@ function predictTarget(model, target, encodedRow) {
     if (cfg.type === "number") {
         let mu, sd;
         if (train.algorithm === "gp") {
-            const pred = predictGaussianProcess(train.gpByDim[0], x);
+            const pred = predictGaussianProcess(train.gpByDim[0], x, precomputed ? precomputed.chol : null);
             mu = pred.mean;
             sd = Math.sqrt(pred.variance);
         } else {
-            const rf = RandomForestRegression.load(train.rfModel);
+            const rf = precomputed ? precomputed.rf : RandomForestRegression.load(train.rfModel);
             const pred = rf.predict([x]);
             mu = pred[0];
             sd = Math.sqrt(train.residualVariance || 1e-6);
@@ -404,11 +407,11 @@ function predictTarget(model, target, encodedRow) {
         // text
         let mu, sd;
         if (train.algorithm === "gp") {
-            const pred = predictGaussianProcess(train.gpByDim[0], x);
+            const pred = predictGaussianProcess(train.gpByDim[0], x, precomputed ? precomputed.chol : null);
             mu = pred.mean;
             sd = Math.sqrt(pred.variance);
         } else {
-            const rf = RandomForestRegression.load(train.rfModel);
+            const rf = precomputed ? precomputed.rf : RandomForestRegression.load(train.rfModel);
             const pred = rf.predict([x]);
             mu = pred[0];
             sd = Math.sqrt(train.residualVariance || 0.25);
@@ -685,8 +688,16 @@ function applyFixedValuesToEncoded(model, encoded, fixedValues, skippedColumns) 
 
 // This function ranks candidate points by expected improvement for a chosen target.
 function rankCandidatesByEI(model, maximizeCol, candidates, observedBest, targetOutcome) {
+    const train = model.trainedTargets[maximizeCol];
+    const precomputed = {};
+    if (train.algorithm === "gp") {
+        precomputed.chol = new CholeskyDecomposition(new Matrix(train.gpByDim[0].kernelMatrix));
+    } else {
+        precomputed.rf = RandomForestRegression.load(train.rfModel);
+    }
+
     const scored = candidates.map((encoded) => {
-        const pred = predictTarget(model, maximizeCol, encoded);
+        const pred = predictTarget(model, maximizeCol, encoded, precomputed);
         if (pred.type === "number") {
             const ei = expectedImprovement(pred.mu, pred.sd, observedBest);
             return { encoded, pred, objective: ei };
