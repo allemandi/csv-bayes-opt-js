@@ -440,11 +440,15 @@ function trainInternalModel(encodedRows, rawRows, encoding, metadata, lengthScal
     const useRandomForestFallback = encodedRows.length >= LARGE_DATASET_THRESHOLD;
     const targetConfigs = buildTargetConfigs(encoding, metadata);
     const trainedTargets = {};
-    for (const [target, cfg] of Object.entries(targetConfigs)) {
+    const targetEntries = Object.entries(targetConfigs);
+    console.log(`\nTraining internal model with ${encodedRows.length} rows across ${targetEntries.length} target(s) using ${useRandomForestFallback ? "random forest fallback" : "gaussian process"}.`);
+    for (const [targetIndex, [target, cfg]] of targetEntries.entries()) {
+        console.log(`- Training target ${targetIndex + 1}/${targetEntries.length}: ${target}`);
         const dataset = makeDatasetForTarget(encodedRows, rawRows, cfg);
         if (!useRandomForestFallback) {
             const gpByDim = [];
             for (let d = 0; d < dataset.Y[0].length; d += 1) {
+                console.log(`  • fitting GP component ${d + 1}/${dataset.Y[0].length} for target ${target}`);
                 gpByDim.push(
                     fitGaussianProcess(
                         dataset.X,
@@ -458,6 +462,7 @@ function trainInternalModel(encodedRows, rawRows, encoding, metadata, lengthScal
             continue;
         }
         if (cfg.type === "number") {
+            console.log(`  • training Random Forest regression for target ${target}`);
             const y = dataset.Y.map((row) => row[0]);
             const rf = new RandomForestRegression({ nEstimators: 80, maxFeatures: 0.8, seed: 42, replacement: true });
             rf.train(dataset.X, y);
@@ -471,6 +476,7 @@ function trainInternalModel(encodedRows, rawRows, encoding, metadata, lengthScal
             };
             continue;
         }
+        console.log(`  • training Random Forest classifier for target ${target}`);
         const y = dataset.Y.map((row) => row[0]);
         const rf = new RandomForestRegression({ nEstimators: 120, maxFeatures: 0.8, seed: 42, replacement: true });
         rf.train(dataset.X, y);
@@ -503,10 +509,12 @@ function validateModel(model, encodedRows, rawRows, splitMode) {
         ? [{ train: shuffledIdx.slice(0, Math.max(1, Math.floor(0.8 * n))), test: shuffledIdx.slice(Math.max(1, Math.floor(0.8 * n))) }]
         : idx.map((i) => ({ train: idx.filter((j) => j !== i), test: [i] }));
 
+    console.log(`\nValidating model using ${splitMode} mode with ${folds.length} fold${folds.length === 1 ? "" : "s"}...`);
     const perColumn = {};
     for (const c of model.userColumns) perColumn[c] = { yTrue: [], yPred: [], inside95: 0, count: 0 };
 
-    for (const fold of folds) {
+    for (const [foldIndex, fold] of folds.entries()) {
+        console.log(`  • fold ${foldIndex + 1}/${folds.length}: training on ${fold.train.length} rows, testing on ${fold.test.length} rows`);
         const foldModel = trainInternalModel(
             fold.train.map((i) => encodedRows[i]),
             fold.train.map((i) => rawRows[i]),
@@ -584,8 +592,10 @@ function permutationImportance(model, encodedRows, rawRows) {
         baselineByTarget[target] = mae(yTrue, yPred);
     }
 
+    console.log("\nComputing permutation importance...");
     const importance = {};
-    for (const sourceCol of model.userColumns) {
+    for (const [sourceIndex, sourceCol] of model.userColumns.entries()) {
+        console.log(`  • permuting ${sourceCol} (${sourceIndex + 1}/${model.userColumns.length})`);
         const permutedRaw = shuffled(rawRows.map((r) => r[sourceCol]));
         const perturbed = encodedRows.map((row, idx) => {
             const copy = { ...row };

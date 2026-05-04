@@ -27,6 +27,7 @@ async function runTrain(csvPath, outputPath) {
   if (!postOutlierRows.length) throw new Error("All rows were removed during outlier handling.");
 
   const transformed = fitAndTransform(postOutlierRows, metadata);
+  console.log(`\nStarting model training on ${transformed.encodedRows.length} rows and ${Object.keys(metadata).length} columns...`);
   const model = trainInternalModel(transformed.encodedRows, postOutlierRows, transformed.encoding, metadata, 0.35);
   model.userColumns = cleaned.userColumns;
   model.internalColumns = cleaned.internalColumns;
