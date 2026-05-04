@@ -535,17 +535,23 @@ function validateModel(model, encodedRows, rawRows, splitMode) {
         }
     }
 
-    const report = {};
-    for (const [c, b] of Object.entries(perColumn)) {
-        const maeValue = mae(b.yTrue, b.yPred);
-        const r2Value = r2(b.yTrue, b.yPred);
-        const calibration = b.count ? (100 * b.inside95) / b.count : 0;
-        let verdict = "Good predictive reliability.";
-        if (r2Value < 0.5) verdict = "Weak predictive reliability. Improve data quality/volume.";
-        else if (r2Value < 0.75) verdict = "Moderate predictive reliability.";
-        if (model.metadata[c].originalType === "text") verdict = `${verdict} (Categorical metrics are hit/miss approximations.)`;
-        report[c] = { type: model.metadata[c].originalType, mae: maeValue, r2: r2Value, calibration95Pct: calibration, verdict };
+const report = {};
+for (const [c, b] of Object.entries(perColumn)) {
+    const calibration = b.count ? (100 * b.inside95) / b.count : 0;
+    let maeValue, r2Value, verdict;
+    if (model.metadata[c].originalType === "text") {
+        const accuracy = b.count ? b.inside95 / b.count : 0;
+        maeValue = 1 - accuracy;
+        r2Value = accuracy;
+        verdict = accuracy >= 0.75 ? "Good predictive reliability." : accuracy >= 0.5 ? "Moderate predictive reliability." : "Weak predictive reliability. Improve data quality/volume.";
+        verdict = `${verdict} (Categorical accuracy: ${(100 * accuracy).toFixed(1)}%)`;
+    } else {
+        maeValue = mae(b.yTrue, b.yPred);
+        r2Value = r2(b.yTrue, b.yPred);
+        verdict = r2Value >= 0.75 ? "Good predictive reliability." : r2Value >= 0.5 ? "Moderate predictive reliability." : "Weak predictive reliability. Improve data quality/volume.";
     }
+    report[c] = { type: model.metadata[c].originalType, mae: maeValue, r2: r2Value, calibration95Pct: calibration, verdict };
+}
     return report;
 }
 
