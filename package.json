@@ -20,7 +20,7 @@
   "homepage": "https://github.com/allemandi/csv-bayes-opt#readme",
   "dependencies": {
     "@tensorflow/tfjs-node": "^4.22.0",
-    "commander": "^14.0.3",
+    "commander": "^15.0.0",
     "csv-parse": "^6.2.1",
     "danfojs-node": "^1.2.0",
     "ml-matrix": "^6.12.2",
